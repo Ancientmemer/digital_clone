@@ -2,18 +2,18 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<title>Digital Clone – Palm Spawn</title>
+<title>Real VR-Feel Digital Clone (PC)</title>
 <style>
   body{margin:0;overflow:hidden;background:#000}
   video{
-    position:absolute;
-    width:50vw;height:100vh;
+    position:fixed;
+    top:0;left:0;
+    width:100vw;height:100vh;
     object-fit:cover;
     transform:scaleX(-1);
-    left:0;top:0;
-    opacity:0.35;
+    z-index:-1;
   }
-  canvas{position:absolute;left:50vw;top:0}
+  canvas{position:fixed;top:0;left:0}
 </style>
 </head>
 
@@ -21,78 +21,117 @@
 <video id="video" autoplay playsinline></video>
 <canvas id="three"></canvas>
 
+<!-- MediaPipe Pose -->
 <script src="https://cdn.jsdelivr.net/npm/@mediapipe/pose/pose.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"></script>
+
+<!-- Three.js -->
 <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/build/three.min.js"></script>
 
 <script>
-/* ========== THREE ========== */
+/* ========== VIDEO BACKGROUND ========== */
+const video=document.getElementById("video");
+
+/* ========== THREE SCENE ========== */
 const scene=new THREE.Scene();
-const camera=new THREE.PerspectiveCamera(45,(window.innerWidth/2)/window.innerHeight,0.1,100);
-camera.position.set(0,3,10);
 
-const renderer=new THREE.WebGLRenderer({canvas:three,alpha:true});
-renderer.setSize(window.innerWidth/2,window.innerHeight);
+const camera=new THREE.PerspectiveCamera(
+  45,
+  window.innerWidth/window.innerHeight,
+  0.1,
+  100
+);
+camera.position.set(0,1.6,4); // eye-level
 
-scene.add(new THREE.AmbientLight(0xffffff,0.7));
+const renderer=new THREE.WebGLRenderer({
+  canvas:three,
+  alpha:true,
+  antialias:true
+});
+renderer.setSize(window.innerWidth,window.innerHeight);
+renderer.setPixelRatio(window.devicePixelRatio);
+
+scene.add(new THREE.AmbientLight(0xffffff,0.8));
 const light=new THREE.DirectionalLight(0x00f0ff,1);
-light.position.set(5,10,5);scene.add(light);
+light.position.set(5,10,5);
+scene.add(light);
 
-/* ========== MATERIAL ========== */
+/* ========== VIDEO AS WORLD BACKGROUND ========== */
+const videoTexture=new THREE.VideoTexture(video);
+videoTexture.minFilter=THREE.LinearFilter;
+videoTexture.magFilter=THREE.LinearFilter;
+scene.background=videoTexture;
+
+/* ========== CLONE MATERIAL ========== */
 const mat=new THREE.MeshPhongMaterial({
-  color:0x00f0ff, emissive:0x00f0ff,
-  transparent:true, opacity:0.65
+  color:0x00f0ff,
+  emissive:0x00f0ff,
+  transparent:true,
+  opacity:0.6
 });
 
-const limb=(x,y,z)=>new THREE.Mesh(new THREE.BoxGeometry(x,y,z),mat);
+const limb=(x,y,z)=>new THREE.Mesh(
+  new THREE.BoxGeometry(x,y,z),
+  mat
+);
 
-/* ========== CLONE FACTORY ========== */
-const clones=[];
-function createClone(x){
-  const g=new THREE.Group();
-  scene.add(g);
-  g.position.set(x,-1,0);
+/* ========== CLONE AVATAR ========== */
+const clone=new THREE.Group();
+scene.add(clone);
 
-  const torso=limb(1.2,2,0.6);g.add(torso);
-  const head=limb(0.8,0.8,0.8);head.position.y=1.6;torso.add(head);
+// 👉 clone stands beside YOU
+clone.position.set(0.8,-1.2,-2.5);
 
-  const lArm=limb(0.4,1.2,0.4), lFore=limb(0.35,1,0.35);
-  lArm.position.set(-0.9,0.5,0); lFore.position.y=-0.9;
-  lArm.add(lFore); torso.add(lArm);
+const torso=limb(0.6,1.4,0.4);
+clone.add(torso);
 
-  const rArm=limb(0.4,1.2,0.4), rFore=limb(0.35,1,0.35);
-  rArm.position.set(0.9,0.5,0); rFore.position.y=-0.9;
-  rArm.add(rFore); torso.add(rArm);
+const head=limb(0.4,0.4,0.4);
+head.position.y=1;
+torso.add(head);
 
-  const lLeg=limb(0.45,1.5,0.45), lShin=limb(0.4,1.4,0.4);
-  lLeg.position.set(-0.4,-1.8,0); lShin.position.y=-1.2;
-  lLeg.add(lShin); torso.add(lLeg);
+// arms
+const lArm=limb(0.2,0.7,0.2);
+const lFore=limb(0.18,0.6,0.18);
+lArm.position.set(-0.45,0.4,0);
+lFore.position.y=-0.55;
+lArm.add(lFore);
+torso.add(lArm);
 
-  const rLeg=limb(0.45,1.5,0.45), rShin=limb(0.4,1.4,0.4);
-  rLeg.position.set(0.4,-1.8,0); rShin.position.y=-1.2;
-  rLeg.add(rShin); torso.add(rLeg);
+const rArm=limb(0.2,0.7,0.2);
+const rFore=limb(0.18,0.6,0.18);
+rArm.position.set(0.45,0.4,0);
+rFore.position.y=-0.55;
+rArm.add(rFore);
+torso.add(rArm);
 
-  return {group:g, torso, lFore, rFore, lShin, rShin};
-}
+// legs
+const lLeg=limb(0.25,0.9,0.25);
+const lShin=limb(0.22,0.8,0.22);
+lLeg.position.set(-0.2,-1,0);
+lShin.position.y=-0.7;
+lLeg.add(lShin);
+torso.add(lLeg);
 
-// initial clone
-clones.push(createClone(0));
+const rLeg=limb(0.25,0.9,0.25);
+const rShin=limb(0.22,0.8,0.22);
+rLeg.position.set(0.2,-1,0);
+rShin.position.y=-0.7;
+rLeg.add(rShin);
+torso.add(rLeg);
 
-/* ========== UTILS ========== */
+/* ========== MATH UTILS ========== */
 const V=p=>new THREE.Vector3(1-p.x,1-p.y,-p.z);
 const ang=(a,b,c)=>{
-  const ab=a.clone().sub(b), cb=c.clone().sub(b);
+  const ab=a.clone().sub(b);
+  const cb=c.clone().sub(b);
   return ab.angleTo(cb);
 };
 const smooth=(b,t)=>b.rotation.x+=(t-b.rotation.x)*0.35;
 
-/* ========== PALM TIMER ========== */
-let palmTimer=0;
-const PALM_HOLD=8000; // 8 seconds
-
-/* ========== POSE ========== */
-const video=document.getElementById("video");
-const pose=new Pose({locateFile:f=>`https://cdn.jsdelivr.net/npm/@mediapipe/pose/${f}`});
+/* ========== MEDIAPIPE POSE ========== */
+const pose=new Pose({
+  locateFile:f=>`https://cdn.jsdelivr.net/npm/@mediapipe/pose/${f}`
+});
 pose.setOptions({
   modelComplexity:1,
   smoothLandmarks:true,
@@ -104,31 +143,20 @@ pose.onResults(r=>{
   if(!r.poseLandmarks) return;
   const lm=r.poseLandmarks;
 
-  // palm detection (both arms raised)
-  const palmUp = lm[15].y < lm[11].y && lm[16].y < lm[12].y;
-
-  if(palmUp){
-    palmTimer+=16;
-    if(palmTimer>PALM_HOLD){
-      palmTimer=0;
-      clones.push(createClone(clones.length*2));
-    }
-  } else palmTimer=0;
-
   const LS=V(lm[11]),LE=V(lm[13]),LW=V(lm[15]);
   const RS=V(lm[12]),RE=V(lm[14]),RW=V(lm[16]);
   const LH=V(lm[23]),LK=V(lm[25]),LA=V(lm[27]);
   const RH=V(lm[24]),RK=V(lm[26]),RA=V(lm[28]);
 
-  clones.forEach(c=>{
-    smooth(c.lFore,ang(LS,LE,LW)-Math.PI/2);
-    smooth(c.rFore,ang(RS,RE,RW)-Math.PI/2);
-    smooth(c.lShin,ang(LH,LK,LA)-Math.PI/2);
-    smooth(c.rShin,ang(RH,RK,RA)-Math.PI/2);
-    c.torso.rotation.y+=( (RS.x-LS.x)-c.torso.rotation.y)*0.25;
-  });
+  smooth(lFore,ang(LS,LE,LW)-Math.PI/2);
+  smooth(rFore,ang(RS,RE,RW)-Math.PI/2);
+  smooth(lShin,ang(LH,LK,LA)-Math.PI/2);
+  smooth(rShin,ang(RH,RK,RA)-Math.PI/2);
+
+  torso.rotation.y+=( (RS.x-LS.x)-torso.rotation.y)*0.25;
 });
 
+/* ========== CAMERA FEED ========== */
 new Camera(video,{
   onFrame:async()=>await pose.send({image:video}),
   width:1280,height:720
