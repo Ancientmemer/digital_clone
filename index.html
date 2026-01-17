@@ -1,0 +1,169 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Full Body Digital Clone</title>
+<style>
+  body { margin:0; overflow:hidden; background:black; }
+  video {
+    position:absolute;
+    width:100vw;
+    height:100vh;
+    object-fit:cover;
+    transform:scaleX(-1);
+    opacity:0.25;
+  }
+  canvas { position:absolute; top:0; left:0; }
+</style>
+</head>
+
+<body>
+<video id="video" autoplay playsinline></video>
+<canvas id="three"></canvas>
+
+<!-- MediaPipe Pose -->
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/pose/pose.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"></script>
+
+<!-- Three.js -->
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/build/three.min.js"></script>
+
+<script>
+/* =======================
+   THREE.JS SCENE
+======================= */
+const scene = new THREE.Scene();
+const camera = new THREE.PerspectiveCamera(45, window.innerWidth/window.innerHeight, 0.1, 1000);
+camera.position.set(0, 3, 10);
+
+const renderer = new THREE.WebGLRenderer({ canvas: document.getElementById("three"), alpha:true });
+renderer.setSize(window.innerWidth, window.innerHeight);
+
+scene.add(new THREE.AmbientLight(0xffffff, 0.6));
+const light = new THREE.DirectionalLight(0x00f0ff, 1);
+light.position.set(5,10,5);
+scene.add(light);
+
+/* =======================
+   AVATAR (SEPARATE BODY)
+======================= */
+const avatar = new THREE.Group();
+scene.add(avatar);
+avatar.position.x = 4;
+
+const mat = new THREE.MeshPhongMaterial({
+  color:0x00f0ff,
+  emissive:0x00f0ff,
+  transparent:true,
+  opacity:0.6
+});
+
+function limb(w,h,d){ return new THREE.Mesh(new THREE.BoxGeometry(w,h,d), mat); }
+
+// torso
+const torso = limb(1.2,2,0.6);
+avatar.add(torso);
+
+// head
+const head = limb(0.8,0.8,0.8);
+head.position.y = 1.6;
+torso.add(head);
+
+// arms
+const lArm = limb(0.4,1.2,0.4);
+const lFore = limb(0.35,1,0.35);
+lArm.position.set(-0.9,0.5,0);
+lFore.position.y = -0.9;
+lArm.add(lFore);
+torso.add(lArm);
+
+const rArm = limb(0.4,1.2,0.4);
+const rFore = limb(0.35,1,0.35);
+rArm.position.set(0.9,0.5,0);
+lFore.position.y = -0.9;
+rFore.position.y = -0.9;
+rArm.add(rFore);
+torso.add(rArm);
+
+// legs
+const lLeg = limb(0.45,1.5,0.45);
+const lShin = limb(0.4,1.4,0.4);
+lLeg.position.set(-0.4,-1.8,0);
+lShin.position.y = -1.2;
+lLeg.add(lShin);
+torso.add(lLeg);
+
+const rLeg = limb(0.45,1.5,0.45);
+const rShin = limb(0.4,1.4,0.4);
+rLeg.position.set(0.4,-1.8,0);
+rShin.position.y = -1.2;
+rLeg.add(rShin);
+torso.add(rLeg);
+
+/* =======================
+   UTIL FUNCTIONS
+======================= */
+function v(p){
+  return new THREE.Vector3(1-p.x, -p.y+1, -p.z);
+}
+
+function angle(a,b,c){
+  const ab = a.clone().sub(b);
+  const cb = c.clone().sub(b);
+  return ab.angleTo(cb);
+}
+
+function smooth(bone, target){
+  bone.rotation.x += (target - bone.rotation.x)*0.35;
+}
+
+/* =======================
+   MEDIAPIPE POSE
+======================= */
+const video = document.getElementById("video");
+
+const pose = new Pose({
+  locateFile: f => `https://cdn.jsdelivr.net/npm/@mediapipe/pose/${f}`
+});
+
+pose.setOptions({
+  modelComplexity:1,
+  smoothLandmarks:true,
+  minDetectionConfidence:0.7,
+  minTrackingConfidence:0.7
+});
+
+pose.onResults(res=>{
+  if(!res.poseLandmarks) return;
+  const lm = res.poseLandmarks;
+
+  const LS=v(lm[11]), LE=v(lm[13]), LW=v(lm[15]);
+  const RS=v(lm[12]), RE=v(lm[14]), RW=v(lm[16]);
+  const LH=v(lm[23]), LK=v(lm[25]), LA=v(lm[27]);
+  const RH=v(lm[24]), RK=v(lm[26]), RA=v(lm[28]);
+
+  smooth(lFore, angle(LS,LE,LW)-Math.PI/2);
+  smooth(rFore, angle(RS,RE,RW)-Math.PI/2);
+  smooth(lShin, angle(LH,LK,LA)-Math.PI/2);
+  smooth(rShin, angle(RH,RK,RA)-Math.PI/2);
+
+  torso.rotation.y += ((RS.x-LS.x)-torso.rotation.y)*0.2;
+});
+
+const cam = new Camera(video,{
+  onFrame: async()=>{ await pose.send({image:video}); },
+  width:1280, height:720
+});
+cam.start();
+
+/* =======================
+   RENDER LOOP
+======================= */
+function animate(){
+  requestAnimationFrame(animate);
+  renderer.render(scene,camera);
+}
+animate();
+</script>
+</body>
+</html>
