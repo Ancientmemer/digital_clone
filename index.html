@@ -2,18 +2,17 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<title>Real VR-Feel Digital Clone (PC)</title>
+<title>Bone Architect – Full Body + Hands</title>
 <style>
   body{margin:0;overflow:hidden;background:#000}
   video{
-    position:fixed;
-    top:0;left:0;
+    position:fixed; inset:0;
     width:100vw;height:100vh;
     object-fit:cover;
     transform:scaleX(-1);
     z-index:-1;
   }
-  canvas{position:fixed;top:0;left:0}
+  canvas{position:fixed; inset:0}
 </style>
 </head>
 
@@ -21,117 +20,79 @@
 <video id="video" autoplay playsinline></video>
 <canvas id="three"></canvas>
 
-<!-- MediaPipe Pose -->
+<!-- MediaPipe -->
 <script src="https://cdn.jsdelivr.net/npm/@mediapipe/pose/pose.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"></script>
 
 <!-- Three.js -->
 <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/build/three.min.js"></script>
 
 <script>
-/* ========== VIDEO BACKGROUND ========== */
-const video=document.getElementById("video");
-
-/* ========== THREE SCENE ========== */
+/* ================= SCENE ================= */
 const scene=new THREE.Scene();
+const camera=new THREE.PerspectiveCamera(45,innerWidth/innerHeight,0.1,100);
+camera.position.set(0,1.6,4);
 
-const camera=new THREE.PerspectiveCamera(
-  45,
-  window.innerWidth/window.innerHeight,
-  0.1,
-  100
-);
-camera.position.set(0,1.6,4); // eye-level
+const renderer=new THREE.WebGLRenderer({canvas:three,alpha:true});
+renderer.setSize(innerWidth,innerHeight);
+renderer.setPixelRatio(devicePixelRatio);
 
-const renderer=new THREE.WebGLRenderer({
-  canvas:three,
-  alpha:true,
-  antialias:true
-});
-renderer.setSize(window.innerWidth,window.innerHeight);
-renderer.setPixelRatio(window.devicePixelRatio);
+const video=document.getElementById("video");
+scene.background=new THREE.VideoTexture(video);
 
-scene.add(new THREE.AmbientLight(0xffffff,0.8));
-const light=new THREE.DirectionalLight(0x00f0ff,1);
-light.position.set(5,10,5);
-scene.add(light);
+/* ================= MATERIAL ================= */
+const mat=new THREE.LineBasicMaterial({color:0x00f0ff});
 
-/* ========== VIDEO AS WORLD BACKGROUND ========== */
-const videoTexture=new THREE.VideoTexture(video);
-videoTexture.minFilter=THREE.LinearFilter;
-videoTexture.magFilter=THREE.LinearFilter;
-scene.background=videoTexture;
+/* ================= BONE HELPERS ================= */
+function bone(){
+  return new THREE.Line(
+    new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(),new THREE.Vector3()]),
+    mat
+  );
+}
 
-/* ========== CLONE MATERIAL ========== */
-const mat=new THREE.MeshPhongMaterial({
-  color:0x00f0ff,
-  emissive:0x00f0ff,
-  transparent:true,
-  opacity:0.6
-});
+function vec(p){
+  return new THREE.Vector3(
+    (1-p.x)*2-1,
+    (1-p.y)*2-1,
+    -p.z*2
+  );
+}
 
-const limb=(x,y,z)=>new THREE.Mesh(
-  new THREE.BoxGeometry(x,y,z),
-  mat
-);
+function setBone(b,a,c){
+  b.geometry.setFromPoints([a,c]);
+}
 
-/* ========== CLONE AVATAR ========== */
-const clone=new THREE.Group();
-scene.add(clone);
+/* ================= SKELETON ================= */
+const skeleton=new THREE.Group();
+scene.add(skeleton);
 
-// 👉 clone stands beside YOU
-clone.position.set(0.8,-1.2,-2.5);
+const bones={
+  head:bone(), spine:bone(),
 
-const torso=limb(0.6,1.4,0.4);
-clone.add(torso);
+  lUA:bone(), lLA:bone(),
+  rUA:bone(), rLA:bone(),
 
-const head=limb(0.4,0.4,0.4);
-head.position.y=1;
-torso.add(head);
-
-// arms
-const lArm=limb(0.2,0.7,0.2);
-const lFore=limb(0.18,0.6,0.18);
-lArm.position.set(-0.45,0.4,0);
-lFore.position.y=-0.55;
-lArm.add(lFore);
-torso.add(lArm);
-
-const rArm=limb(0.2,0.7,0.2);
-const rFore=limb(0.18,0.6,0.18);
-rArm.position.set(0.45,0.4,0);
-rFore.position.y=-0.55;
-rArm.add(rFore);
-torso.add(rArm);
-
-// legs
-const lLeg=limb(0.25,0.9,0.25);
-const lShin=limb(0.22,0.8,0.22);
-lLeg.position.set(-0.2,-1,0);
-lShin.position.y=-0.7;
-lLeg.add(lShin);
-torso.add(lLeg);
-
-const rLeg=limb(0.25,0.9,0.25);
-const rShin=limb(0.22,0.8,0.22);
-rLeg.position.set(0.2,-1,0);
-rShin.position.y=-0.7;
-rLeg.add(rShin);
-torso.add(rLeg);
-
-/* ========== MATH UTILS ========== */
-const V=p=>new THREE.Vector3(1-p.x,1-p.y,-p.z);
-const ang=(a,b,c)=>{
-  const ab=a.clone().sub(b);
-  const cb=c.clone().sub(b);
-  return ab.angleTo(cb);
+  lUL:bone(), lLL:bone(),
+  rUL:bone(), rLL:bone()
 };
-const smooth=(b,t)=>b.rotation.x+=(t-b.rotation.x)*0.35;
 
-/* ========== MEDIAPIPE POSE ========== */
-const pose=new Pose({
-  locateFile:f=>`https://cdn.jsdelivr.net/npm/@mediapipe/pose/${f}`
-});
+Object.values(bones).forEach(b=>skeleton.add(b));
+
+/* ================= HAND BONES ================= */
+function makeHand(){
+  const lines=[];
+  for(let i=0;i<21;i++) lines.push(bone());
+  lines.forEach(l=>skeleton.add(l));
+  return lines;
+}
+
+const leftHand = makeHand();
+const rightHand = makeHand();
+
+/* ================= MEDIAPIPE POSE ================= */
+const pose=new Pose({locateFile:f=>`https://cdn.jsdelivr.net/npm/@mediapipe/pose/${f}`});
 pose.setOptions({
   modelComplexity:1,
   smoothLandmarks:true,
@@ -139,30 +100,69 @@ pose.setOptions({
   minTrackingConfidence:0.7
 });
 
+/* ================= MEDIAPIPE HANDS ================= */
+const hands=new Hands({locateFile:f=>`https://cdn.jsdelivr.net/npm/@mediapipe/hands/${f}`});
+hands.setOptions({
+  maxNumHands:2,
+  modelComplexity:1,
+  minDetectionConfidence:0.7,
+  minTrackingConfidence:0.7
+});
+
+/* ================= UPDATE POSE ================= */
 pose.onResults(r=>{
   if(!r.poseLandmarks) return;
   const lm=r.poseLandmarks;
 
-  const LS=V(lm[11]),LE=V(lm[13]),LW=V(lm[15]);
-  const RS=V(lm[12]),RE=V(lm[14]),RW=V(lm[16]);
-  const LH=V(lm[23]),LK=V(lm[25]),LA=V(lm[27]);
-  const RH=V(lm[24]),RK=V(lm[26]),RA=V(lm[28]);
+  const head=vec(lm[0]);
+  const LS=vec(lm[11]), RS=vec(lm[12]);
+  const LE=vec(lm[13]), RE=vec(lm[14]);
+  const LW=vec(lm[15]), RW=vec(lm[16]);
+  const LH=vec(lm[23]), RH=vec(lm[24]);
+  const LA=vec(lm[27]), RA=vec(lm[28]);
 
-  smooth(lFore,ang(LS,LE,LW)-Math.PI/2);
-  smooth(rFore,ang(RS,RE,RW)-Math.PI/2);
-  smooth(lShin,ang(LH,LK,LA)-Math.PI/2);
-  smooth(rShin,ang(RH,RK,RA)-Math.PI/2);
+  const shoulderMid=LS.clone().add(RS).multiplyScalar(0.5);
+  const hipMid=LH.clone().add(RH).multiplyScalar(0.5);
 
-  torso.rotation.y+=( (RS.x-LS.x)-torso.rotation.y)*0.25;
+  skeleton.position.lerp(shoulderMid,0.25);
+
+  setBone(bones.head, shoulderMid, head);
+  setBone(bones.spine, shoulderMid, hipMid);
+
+  setBone(bones.lUA, shoulderMid, LS);
+  setBone(bones.lLA, LS, LW);
+  setBone(bones.rUA, shoulderMid, RS);
+  setBone(bones.rLA, RS, RW);
+
+  setBone(bones.lUL, hipMid, LH);
+  setBone(bones.lLL, LH, LA);
+  setBone(bones.rUL, hipMid, RH);
+  setBone(bones.rLL, RH, RA);
 });
 
-/* ========== CAMERA FEED ========== */
+/* ================= UPDATE HANDS ================= */
+hands.onResults(r=>{
+  if(!r.multiHandLandmarks) return;
+
+  r.multiHandLandmarks.forEach((hand,i)=>{
+    const target = r.multiHandedness[i].label==="Left" ? leftHand : rightHand;
+    hand.forEach((p,idx)=>{
+      const v=vec(p);
+      target[idx].geometry.setFromPoints([v,v.clone().add(new THREE.Vector3(0,0.02,0))]);
+    });
+  });
+});
+
+/* ================= CAMERA ================= */
 new Camera(video,{
-  onFrame:async()=>await pose.send({image:video}),
+  onFrame:async()=>{
+    await pose.send({image:video});
+    await hands.send({image:video});
+  },
   width:1280,height:720
 }).start();
 
-/* ========== LOOP ========== */
+/* ================= LOOP ================= */
 (function animate(){
   requestAnimationFrame(animate);
   renderer.render(scene,camera);
