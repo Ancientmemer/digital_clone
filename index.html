@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<title>Bone Architect – Full Body + Hands</title>
+<title>Bone Architect – VR Optimized</title>
 <style>
   body{margin:0;overflow:hidden;background:#000}
   video{
@@ -29,144 +29,174 @@
 <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/build/three.min.js"></script>
 
 <script>
-/* ================= SCENE ================= */
-const scene=new THREE.Scene();
-const camera=new THREE.PerspectiveCamera(45,innerWidth/innerHeight,0.1,100);
-camera.position.set(0,1.6,4);
+/* ===================== BASIC SETUP ===================== */
+const video = document.getElementById("video");
+const canvas = document.getElementById("three");
 
-const renderer=new THREE.WebGLRenderer({canvas:three,alpha:true});
-renderer.setSize(innerWidth,innerHeight);
+/* ===================== THREE SCENE ===================== */
+const scene = new THREE.Scene();
+const camera3D = new THREE.PerspectiveCamera(45, innerWidth/innerHeight, 0.1, 100);
+camera3D.position.set(0,1.6,4);
+
+const renderer = new THREE.WebGLRenderer({canvas, alpha:true});
+renderer.setSize(innerWidth, innerHeight);
 renderer.setPixelRatio(devicePixelRatio);
+renderer.setClearDepth(1);
 
-const video=document.getElementById("video");
-scene.background=new THREE.VideoTexture(video);
+/* video as background (optimized) */
+const videoTex = new THREE.VideoTexture(video);
+videoTex.minFilter = THREE.NearestFilter;
+videoTex.magFilter = THREE.NearestFilter;
+videoTex.generateMipmaps = false;
+scene.background = videoTex;
 
-/* ================= MATERIAL ================= */
-const mat=new THREE.LineBasicMaterial({color:0x00f0ff});
+/* ===================== MATERIAL ===================== */
+const mat = new THREE.LineBasicMaterial({color:0x00f0ff});
 
-/* ================= BONE HELPERS ================= */
-function bone(){
-  return new THREE.Line(
-    new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(),new THREE.Vector3()]),
-    mat
-  );
+/* ===================== HELPERS ===================== */
+const vec = p => new THREE.Vector3(
+  (1 - p.x) * 2 - 1,
+  (1 - p.y) * 2 - 1,
+  -p.z * 2
+);
+
+const bone = () => new THREE.Line(
+  new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(), new THREE.Vector3()]),
+  mat
+);
+
+const setBone = (b,a,c) => b.geometry.setFromPoints([a,c]);
+
+/* ===================== CLONE FACTORY ===================== */
+function createSkeleton(offset){
+  const g = new THREE.Group();
+  g.position.x = offset;
+  scene.add(g);
+
+  const b = {
+    head:bone(), spine:bone(),
+    lUA:bone(), lLA:bone(),
+    rUA:bone(), rLA:bone(),
+    lUL:bone(), lLL:bone(),
+    rUL:bone(), rLL:bone()
+  };
+
+  Object.values(b).forEach(x=>g.add(x));
+  return {group:g, bones:b};
 }
 
-function vec(p){
-  return new THREE.Vector3(
-    (1-p.x)*2-1,
-    (1-p.y)*2-1,
-    -p.z*2
-  );
-}
+const clones = [];
+clones.push(createSkeleton(0));
 
-function setBone(b,a,c){
-  b.geometry.setFromPoints([a,c]);
-}
+/* ===================== PALM TIMER ===================== */
+let palmTimer = 0;
+const PALM_HOLD = 8000;
 
-/* ================= SKELETON ================= */
-const skeleton=new THREE.Group();
-scene.add(skeleton);
+/* ===================== MEDIAPIPE POSE ===================== */
+let latestPose = null;
 
-const bones={
-  head:bone(), spine:bone(),
-
-  lUA:bone(), lLA:bone(),
-  rUA:bone(), rLA:bone(),
-
-  lUL:bone(), lLL:bone(),
-  rUL:bone(), rLL:bone()
-};
-
-Object.values(bones).forEach(b=>skeleton.add(b));
-
-/* ================= HAND BONES ================= */
-function makeHand(){
-  const lines=[];
-  for(let i=0;i<21;i++) lines.push(bone());
-  lines.forEach(l=>skeleton.add(l));
-  return lines;
-}
-
-const leftHand = makeHand();
-const rightHand = makeHand();
-
-/* ================= MEDIAPIPE POSE ================= */
-const pose=new Pose({locateFile:f=>`https://cdn.jsdelivr.net/npm/@mediapipe/pose/${f}`});
+const pose = new Pose({
+  locateFile: f => `https://cdn.jsdelivr.net/npm/@mediapipe/pose/${f}`
+});
 pose.setOptions({
-  modelComplexity:1,
-  smoothLandmarks:true,
-  minDetectionConfidence:0.7,
-  minTrackingConfidence:0.7
+  modelComplexity: 0,          // 🔥 optimized
+  smoothLandmarks: true,
+  minDetectionConfidence: 0.6,
+  minTrackingConfidence: 0.6
 });
+pose.onResults(r => latestPose = r.poseLandmarks);
 
-/* ================= MEDIAPIPE HANDS ================= */
-const hands=new Hands({locateFile:f=>`https://cdn.jsdelivr.net/npm/@mediapipe/hands/${f}`});
+/* ===================== MEDIAPIPE HANDS ===================== */
+let handFrame = 0;
+
+const hands = new Hands({
+  locateFile: f => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${f}`
+});
 hands.setOptions({
-  maxNumHands:2,
-  modelComplexity:1,
-  minDetectionConfidence:0.7,
-  minTrackingConfidence:0.7
+  maxNumHands: 2,
+  modelComplexity: 0,
+  minDetectionConfidence: 0.6,
+  minTrackingConfidence: 0.6
 });
-
-/* ================= UPDATE POSE ================= */
-pose.onResults(r=>{
-  if(!r.poseLandmarks) return;
-  const lm=r.poseLandmarks;
-
-  const head=vec(lm[0]);
-  const LS=vec(lm[11]), RS=vec(lm[12]);
-  const LE=vec(lm[13]), RE=vec(lm[14]);
-  const LW=vec(lm[15]), RW=vec(lm[16]);
-  const LH=vec(lm[23]), RH=vec(lm[24]);
-  const LA=vec(lm[27]), RA=vec(lm[28]);
-
-  const shoulderMid=LS.clone().add(RS).multiplyScalar(0.5);
-  const hipMid=LH.clone().add(RH).multiplyScalar(0.5);
-
-  skeleton.position.lerp(shoulderMid,0.25);
-
-  setBone(bones.head, shoulderMid, head);
-  setBone(bones.spine, shoulderMid, hipMid);
-
-  setBone(bones.lUA, shoulderMid, LS);
-  setBone(bones.lLA, LS, LW);
-  setBone(bones.rUA, shoulderMid, RS);
-  setBone(bones.rLA, RS, RW);
-
-  setBone(bones.lUL, hipMid, LH);
-  setBone(bones.lLL, LH, LA);
-  setBone(bones.rUL, hipMid, RH);
-  setBone(bones.rLL, RH, RA);
-});
-
-/* ================= UPDATE HANDS ================= */
 hands.onResults(r=>{
-  if(!r.multiHandLandmarks) return;
+  if(!r.multiHandLandmarks){ palmTimer = 0; return; }
 
-  r.multiHandLandmarks.forEach((hand,i)=>{
-    const target = r.multiHandedness[i].label==="Left" ? leftHand : rightHand;
-    hand.forEach((p,idx)=>{
-      const v=vec(p);
-      target[idx].geometry.setFromPoints([v,v.clone().add(new THREE.Vector3(0,0.02,0))]);
-    });
+  const palmUp = r.multiHandLandmarks.some(h=>{
+    return h[8].y < h[0].y; // index above wrist
   });
+
+  if(palmUp){
+    palmTimer += 16;
+    if(palmTimer > PALM_HOLD){
+      palmTimer = 0;
+      clones.push(createSkeleton(clones.length * 1.2));
+    }
+  } else palmTimer = 0;
 });
 
-/* ================= CAMERA ================= */
+/* ===================== APPLY SKELETON ===================== */
+function updateSkeleton(lm){
+  if(!lm) return;
+
+  const head = vec(lm[0]);
+  const LS = vec(lm[11]), RS = vec(lm[12]);
+  const LW = vec(lm[15]), RW = vec(lm[16]);
+  const LH = vec(lm[23]), RH = vec(lm[24]);
+  const LA = vec(lm[27]), RA = vec(lm[28]);
+
+  const shoulderMid = LS.clone().add(RS).multiplyScalar(0.5);
+  const hipMid = LH.clone().add(RH).multiplyScalar(0.5);
+
+  clones.forEach(c=>{
+    c.group.position.lerp(shoulderMid, 0.25);
+
+    setBone(c.bones.head, shoulderMid, head);
+    setBone(c.bones.spine, shoulderMid, hipMid);
+
+    setBone(c.bones.lUA, shoulderMid, LS);
+    setBone(c.bones.lLA, LS, LW);
+    setBone(c.bones.rUA, shoulderMid, RS);
+    setBone(c.bones.rLA, RS, RW);
+
+    setBone(c.bones.lUL, hipMid, LH);
+    setBone(c.bones.lLL, LH, LA);
+    setBone(c.bones.rUL, hipMid, RH);
+    setBone(c.bones.rLL, RH, RA);
+  });
+}
+
+/* ===================== CAMERA ===================== */
 new Camera(video,{
-  onFrame:async()=>{
-    await pose.send({image:video});
-    await hands.send({image:video});
-  },
-  width:1280,height:720
+  width: 960, height: 540,       // 🔥 lower resolution
+  onFrame: async ()=>{
+    await pose.send({image: video});
+
+    handFrame++;
+    if(handFrame % 3 === 0){
+      await hands.send({image: video});
+    }
+
+    updateSkeleton(latestPose);
+  }
 }).start();
 
-/* ================= LOOP ================= */
-(function animate(){
+/* ===================== FPS-CAPPED RENDER LOOP ===================== */
+let last = 0;
+function animate(t){
+  if(t - last > 33){ // ~30 FPS
+    renderer.render(scene, camera3D);
+    last = t;
+  }
   requestAnimationFrame(animate);
-  renderer.render(scene,camera);
-})();
+}
+animate();
+
+/* ===================== RESIZE ===================== */
+addEventListener("resize", ()=>{
+  camera3D.aspect = innerWidth/innerHeight;
+  camera3D.updateProjectionMatrix();
+  renderer.setSize(innerWidth, innerHeight);
+});
 </script>
 </body>
 </html>
