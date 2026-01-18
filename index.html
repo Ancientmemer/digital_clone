@@ -2,72 +2,71 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<title>Bone Architect – VR Optimized</title>
+<title>Bone Architect – FINAL WORKING</title>
 <style>
-  body{margin:0;overflow:hidden;background:#000}
-  video{
-    position:fixed; inset:0;
-    width:100vw;height:100vh;
+  body { margin:0; overflow:hidden; background:#000 }
+  video {
+    position:fixed;
+    inset:0;
+    width:100vw;
+    height:100vh;
     object-fit:cover;
     transform:scaleX(-1);
     z-index:-1;
   }
-  canvas{position:fixed; inset:0}
+  canvas { position:fixed; inset:0 }
 </style>
 </head>
 
 <body>
-<video id="video" autoplay playsinline></video>
+
+<video id="video" autoplay playsinline muted></video>
 <canvas id="three"></canvas>
 
-<!-- MediaPipe -->
-<script src="https://cdn.jsdelivr.net/npm/@mediapipe/pose/pose.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"></script>
-
-<!-- Three.js -->
+<!-- THREE -->
 <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/build/three.min.js"></script>
 
+<!-- MEDIAPIPE -->
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/pose/pose.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js"></script>
+
 <script>
-/* ===================== BASIC SETUP ===================== */
+/* ================= CAMERA SAFE START ================= */
 const video = document.getElementById("video");
-const canvas = document.getElementById("three");
 
-/* ===================== THREE SCENE ===================== */
-const scene = new THREE.Scene();
-const camera3D = new THREE.PerspectiveCamera(45, innerWidth/innerHeight, 0.1, 100);
-camera3D.position.set(0,1.6,4);
+async function startCamera(){
+  try{
+    const stream = await navigator.mediaDevices.getUserMedia({
+      video:{ width:960, height:540 },
+      audio:false
+    });
+    video.srcObject = stream;
+    await video.play();
+    init(); // start system ONLY after camera works
+  }catch(e){
+    alert("Camera error: " + e);
+  }
+}
 
-const renderer = new THREE.WebGLRenderer({canvas, alpha:true});
-renderer.setSize(innerWidth, innerHeight);
-renderer.setPixelRatio(devicePixelRatio);
-renderer.setClearDepth(1);
+/* ================= THREE SCENE ================= */
+let scene, cam3D, renderer;
+let clones = [];
 
-/* video as background (optimized) */
-const videoTex = new THREE.VideoTexture(video);
-videoTex.minFilter = THREE.NearestFilter;
-videoTex.magFilter = THREE.NearestFilter;
-videoTex.generateMipmaps = false;
-scene.background = videoTex;
+const mat = new THREE.LineBasicMaterial({ color:0x00f0ff });
 
-/* ===================== MATERIAL ===================== */
-const mat = new THREE.LineBasicMaterial({color:0x00f0ff});
-
-/* ===================== HELPERS ===================== */
-const vec = p => new THREE.Vector3(
-  (1 - p.x) * 2 - 1,
-  (1 - p.y) * 2 - 1,
-  -p.z * 2
-);
-
-const bone = () => new THREE.Line(
-  new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(), new THREE.Vector3()]),
+const bone = ()=>new THREE.Line(
+  new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(),new THREE.Vector3()]),
   mat
 );
 
-const setBone = (b,a,c) => b.geometry.setFromPoints([a,c]);
+const vec = p => new THREE.Vector3(
+  (1-p.x)*2-1,
+  (1-p.y)*2-1,
+  -p.z*2
+);
 
-/* ===================== CLONE FACTORY ===================== */
+const setBone = (b,a,c)=>b.geometry.setFromPoints([a,c]);
+
 function createSkeleton(offset){
   const g = new THREE.Group();
   g.position.x = offset;
@@ -80,61 +79,66 @@ function createSkeleton(offset){
     lUL:bone(), lLL:bone(),
     rUL:bone(), rLL:bone()
   };
-
   Object.values(b).forEach(x=>g.add(x));
-  return {group:g, bones:b};
+  return {group:g,bones:b};
 }
 
-const clones = [];
-clones.push(createSkeleton(0));
-
-/* ===================== PALM TIMER ===================== */
+/* ================= MEDIAPIPE ================= */
+let latestPose = null;
 let palmTimer = 0;
 const PALM_HOLD = 8000;
 
-/* ===================== MEDIAPIPE POSE ===================== */
-let latestPose = null;
-
 const pose = new Pose({
-  locateFile: f => `https://cdn.jsdelivr.net/npm/@mediapipe/pose/${f}`
+  locateFile:f=>`https://cdn.jsdelivr.net/npm/@mediapipe/pose/${f}`
 });
 pose.setOptions({
-  modelComplexity: 0,          // 🔥 optimized
-  smoothLandmarks: true,
-  minDetectionConfidence: 0.6,
-  minTrackingConfidence: 0.6
+  modelComplexity:0,
+  smoothLandmarks:true,
+  minDetectionConfidence:0.6,
+  minTrackingConfidence:0.6
 });
-pose.onResults(r => latestPose = r.poseLandmarks);
-
-/* ===================== MEDIAPIPE HANDS ===================== */
-let handFrame = 0;
+pose.onResults(r=>latestPose=r.poseLandmarks);
 
 const hands = new Hands({
-  locateFile: f => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${f}`
+  locateFile:f=>`https://cdn.jsdelivr.net/npm/@mediapipe/hands/${f}`
 });
 hands.setOptions({
-  maxNumHands: 2,
-  modelComplexity: 0,
-  minDetectionConfidence: 0.6,
-  minTrackingConfidence: 0.6
+  maxNumHands:2,
+  modelComplexity:0,
+  minDetectionConfidence:0.6,
+  minTrackingConfidence:0.6
 });
 hands.onResults(r=>{
-  if(!r.multiHandLandmarks){ palmTimer = 0; return; }
+  if(!r.multiHandLandmarks){ palmTimer=0; return; }
 
-  const palmUp = r.multiHandLandmarks.some(h=>{
-    return h[8].y < h[0].y; // index above wrist
-  });
-
+  const palmUp = r.multiHandLandmarks.some(h=>h[8].y < h[0].y);
   if(palmUp){
-    palmTimer += 16;
-    if(palmTimer > PALM_HOLD){
-      palmTimer = 0;
-      clones.push(createSkeleton(clones.length * 1.2));
+    palmTimer+=16;
+    if(palmTimer>PALM_HOLD){
+      palmTimer=0;
+      clones.push(createSkeleton(clones.length*1.2));
     }
-  } else palmTimer = 0;
+  }else palmTimer=0;
 });
 
-/* ===================== APPLY SKELETON ===================== */
+/* ================= INIT AFTER CAMERA ================= */
+function init(){
+  scene = new THREE.Scene();
+  scene.background = new THREE.VideoTexture(video);
+
+  cam3D = new THREE.PerspectiveCamera(45,innerWidth/innerHeight,0.1,100);
+  cam3D.position.set(0,1.6,4);
+
+  renderer = new THREE.WebGLRenderer({canvas:three,alpha:true});
+  renderer.setSize(innerWidth,innerHeight);
+  renderer.setPixelRatio(devicePixelRatio);
+
+  clones.push(createSkeleton(0));
+
+  run();
+}
+
+/* ================= APPLY SKELETON ================= */
 function updateSkeleton(lm){
   if(!lm) return;
 
@@ -148,7 +152,7 @@ function updateSkeleton(lm){
   const hipMid = LH.clone().add(RH).multiplyScalar(0.5);
 
   clones.forEach(c=>{
-    c.group.position.lerp(shoulderMid, 0.25);
+    c.group.position.lerp(shoulderMid,0.25);
 
     setBone(c.bones.head, shoulderMid, head);
     setBone(c.bones.spine, shoulderMid, hipMid);
@@ -165,37 +169,28 @@ function updateSkeleton(lm){
   });
 }
 
-/* ===================== CAMERA ===================== */
-new Camera(video,{
-  width: 960, height: 540,       // 🔥 lower resolution
-  onFrame: async ()=>{
-    await pose.send({image: video});
+/* ================= MAIN LOOP ================= */
+let last=0, handFrame=0;
 
+async function run(t){
+  if(t-last>33){ // ~30fps
+    await pose.send({image:video});
     handFrame++;
-    if(handFrame % 3 === 0){
-      await hands.send({image: video});
-    }
-
+    if(handFrame%3===0) await hands.send({image:video});
     updateSkeleton(latestPose);
+    renderer.render(scene,cam3D);
+    last=t;
   }
-}).start();
-
-/* ===================== FPS-CAPPED RENDER LOOP ===================== */
-let last = 0;
-function animate(t){
-  if(t - last > 33){ // ~30 FPS
-    renderer.render(scene, camera3D);
-    last = t;
-  }
-  requestAnimationFrame(animate);
+  requestAnimationFrame(run);
 }
-animate();
 
-/* ===================== RESIZE ===================== */
-addEventListener("resize", ()=>{
-  camera3D.aspect = innerWidth/innerHeight;
-  camera3D.updateProjectionMatrix();
-  renderer.setSize(innerWidth, innerHeight);
+/* ================= START ================= */
+startCamera();
+
+addEventListener("resize",()=>{
+  cam3D.aspect=innerWidth/innerHeight;
+  cam3D.updateProjectionMatrix();
+  renderer.setSize(innerWidth,innerHeight);
 });
 </script>
 </body>
