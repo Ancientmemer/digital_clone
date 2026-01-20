@@ -2,24 +2,21 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<title>Bone Architect – FINAL WORKING</title>
+<title>Hologram Clone – Gesture Control</title>
 <style>
-  body { margin:0; overflow:hidden; background:#000 }
-  video {
-    position:fixed;
-    inset:0;
-    width:100vw;
-    height:100vh;
+  body{margin:0;overflow:hidden;background:#000}
+  video{
+    position:fixed; inset:0;
+    width:100vw;height:100vh;
     object-fit:cover;
     transform:scaleX(-1);
     z-index:-1;
   }
-  canvas { position:fixed; inset:0 }
+  canvas{position:fixed; inset:0}
 </style>
 </head>
 
 <body>
-
 <video id="video" autoplay playsinline muted></video>
 <canvas id="three"></canvas>
 
@@ -31,63 +28,79 @@
 <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js"></script>
 
 <script>
-/* ================= CAMERA SAFE START ================= */
+/* ================= CAMERA ================= */
 const video = document.getElementById("video");
+navigator.mediaDevices.getUserMedia({
+  video:{width:960,height:540}, audio:false
+}).then(s=>{
+  video.srcObject=s;
+  video.play();
+  init();
+});
 
-async function startCamera(){
-  try{
-    const stream = await navigator.mediaDevices.getUserMedia({
-      video:{ width:960, height:540 },
-      audio:false
-    });
-    video.srcObject = stream;
-    await video.play();
-    init(); // start system ONLY after camera works
-  }catch(e){
-    alert("Camera error: " + e);
-  }
-}
+/* ================= THREE ================= */
+let scene, cam, renderer;
+const COLOR = 0x00f0ff; // 🔥 CHANGE COLOR HERE
 
-/* ================= THREE SCENE ================= */
-let scene, cam3D, renderer;
-let clones = [];
-
-const mat = new THREE.LineBasicMaterial({ color:0x00f0ff });
+const mat = new THREE.LineBasicMaterial({
+  color: COLOR,
+  linewidth: 3
+});
 
 const bone = ()=>new THREE.Line(
-  new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(),new THREE.Vector3()]),
+  new THREE.BufferGeometry().setFromPoints([
+    new THREE.Vector3(), new THREE.Vector3()
+  ]),
   mat
 );
 
-const vec = p => new THREE.Vector3(
+const V = p => new THREE.Vector3(
   (1-p.x)*2-1,
   (1-p.y)*2-1,
-  -p.z*2
+  0   // flat (reel look)
 );
 
 const setBone = (b,a,c)=>b.geometry.setFromPoints([a,c]);
+
+/* ================= CLONES ================= */
+const clones = [];
 
 function createSkeleton(offset){
   const g = new THREE.Group();
   g.position.x = offset;
   scene.add(g);
 
-  const b = {
+  const s = {
     head:bone(), spine:bone(),
     lUA:bone(), lLA:bone(),
     rUA:bone(), rLA:bone(),
     lUL:bone(), lLL:bone(),
     rUL:bone(), rLL:bone()
   };
-  Object.values(b).forEach(x=>g.add(x));
-  return {group:g,bones:b};
+
+  Object.values(s).forEach(b=>g.add(b));
+  return {group:g, bones:s};
 }
 
-/* ================= MEDIAPIPE ================= */
-let latestPose = null;
-let palmTimer = 0;
-const PALM_HOLD = 8000;
+/* ================= INIT ================= */
+function init(){
+  scene = new THREE.Scene();
+  scene.background = new THREE.VideoTexture(video);
 
+  cam = new THREE.PerspectiveCamera(45,innerWidth/innerHeight,0.1,10);
+  cam.position.z = 3;
+
+  renderer = new THREE.WebGLRenderer({canvas:three,alpha:true});
+  renderer.setSize(innerWidth,innerHeight);
+  renderer.setPixelRatio(devicePixelRatio);
+
+  clones.push(createSkeleton(0.6)); // initial clone
+
+  startPose();
+  animate();
+}
+
+/* ================= MEDIAPIPE POSE ================= */
 const pose = new Pose({
   locateFile:f=>`https://cdn.jsdelivr.net/npm/@mediapipe/pose/${f}`
 });
@@ -97,99 +110,116 @@ pose.setOptions({
   minDetectionConfidence:0.6,
   minTrackingConfidence:0.6
 });
-pose.onResults(r=>latestPose=r.poseLandmarks);
 
-const hands = new Hands({
-  locateFile:f=>`https://cdn.jsdelivr.net/npm/@mediapipe/hands/${f}`
-});
-hands.setOptions({
-  maxNumHands:2,
-  modelComplexity:0,
-  minDetectionConfidence:0.6,
-  minTrackingConfidence:0.6
-});
-hands.onResults(r=>{
-  if(!r.multiHandLandmarks){ palmTimer=0; return; }
+pose.onResults(r=>{
+  if(!r.poseLandmarks) return;
+  const lm = r.poseLandmarks;
 
-  const palmUp = r.multiHandLandmarks.some(h=>h[8].y < h[0].y);
-  if(palmUp){
-    palmTimer+=16;
-    if(palmTimer>PALM_HOLD){
-      palmTimer=0;
-      clones.push(createSkeleton(clones.length*1.2));
-    }
-  }else palmTimer=0;
-});
-
-/* ================= INIT AFTER CAMERA ================= */
-function init(){
-  scene = new THREE.Scene();
-  scene.background = new THREE.VideoTexture(video);
-
-  cam3D = new THREE.PerspectiveCamera(45,innerWidth/innerHeight,0.1,100);
-  cam3D.position.set(0,1.6,4);
-
-  renderer = new THREE.WebGLRenderer({canvas:three,alpha:true});
-  renderer.setSize(innerWidth,innerHeight);
-  renderer.setPixelRatio(devicePixelRatio);
-
-  clones.push(createSkeleton(0));
-
-  run();
-}
-
-/* ================= APPLY SKELETON ================= */
-function updateSkeleton(lm){
-  if(!lm) return;
-
-  const head = vec(lm[0]);
-  const LS = vec(lm[11]), RS = vec(lm[12]);
-  const LW = vec(lm[15]), RW = vec(lm[16]);
-  const LH = vec(lm[23]), RH = vec(lm[24]);
-  const LA = vec(lm[27]), RA = vec(lm[28]);
+  const head = V(lm[0]);
+  const LS = V(lm[11]), RS = V(lm[12]);
+  const LW = V(lm[15]), RW = V(lm[16]);
+  const LH = V(lm[23]), RH = V(lm[24]);
+  const LA = V(lm[27]), RA = V(lm[28]);
 
   const shoulderMid = LS.clone().add(RS).multiplyScalar(0.5);
   const hipMid = LH.clone().add(RH).multiplyScalar(0.5);
 
-  clones.forEach(c=>{
-    c.group.position.lerp(shoulderMid,0.25);
+  clones.forEach((c,i)=>{
+    const off = 0.6 + i*0.6;
 
-    setBone(c.bones.head, shoulderMid, head);
-    setBone(c.bones.spine, shoulderMid, hipMid);
+    const SM = shoulderMid.clone(); SM.x += off;
+    const HM = hipMid.clone(); HM.x += off;
+    const H  = head.clone(); H.x += off;
 
-    setBone(c.bones.lUA, shoulderMid, LS);
-    setBone(c.bones.lLA, LS, LW);
-    setBone(c.bones.rUA, shoulderMid, RS);
-    setBone(c.bones.rLA, RS, RW);
+    const lS=LS.clone();lS.x+=off; const rS=RS.clone();rS.x+=off;
+    const lW=LW.clone();lW.x+=off; const rW=RW.clone();rW.x+=off;
+    const lH=LH.clone();lH.x+=off; const rH=RH.clone();rH.x+=off;
+    const lA=LA.clone();lA.x+=off; const rA=RA.clone();rA.x+=off;
 
-    setBone(c.bones.lUL, hipMid, LH);
-    setBone(c.bones.lLL, LH, LA);
-    setBone(c.bones.rUL, hipMid, RH);
-    setBone(c.bones.rLL, RH, RA);
+    setBone(c.bones.head, SM, H);
+    setBone(c.bones.spine, SM, HM);
+
+    setBone(c.bones.lUA, SM, lS);
+    setBone(c.bones.lLA, lS, lW);
+    setBone(c.bones.rUA, SM, rS);
+    setBone(c.bones.rLA, rS, rW);
+
+    setBone(c.bones.lUL, HM, lH);
+    setBone(c.bones.lLL, lH, lA);
+    setBone(c.bones.rUL, HM, rH);
+    setBone(c.bones.rLL, rH, rA);
   });
-}
+});
 
-/* ================= MAIN LOOP ================= */
-let last=0, handFrame=0;
+/* ================= MEDIAPIPE HANDS ================= */
+const hands = new Hands({
+  locateFile:f=>`https://cdn.jsdelivr.net/npm/@mediapipe/hands/${f}`
+});
+hands.setOptions({
+  maxNumHands:1,
+  modelComplexity:0,
+  minDetectionConfidence:0.6,
+  minTrackingConfidence:0.6
+});
 
-async function run(t){
-  if(t-last>33){ // ~30fps
-    await pose.send({image:video});
-    handFrame++;
-    if(handFrame%3===0) await hands.send({image:video});
-    updateSkeleton(latestPose);
-    renderer.render(scene,cam3D);
-    last=t;
+let palmTimer=0, fistTimer=0;
+const HOLD = 5000; // 5 seconds
+
+hands.onResults(r=>{
+  if(!r.multiHandLandmarks){
+    palmTimer=0; fistTimer=0; return;
   }
-  requestAnimationFrame(run);
+
+  const h = r.multiHandLandmarks[0];
+  const wrist = h[0];
+  const index = h[8];
+  const middle = h[12];
+
+  const isPalm = index.y < wrist.y && middle.y < wrist.y;
+  const isFist = index.y > wrist.y && middle.y > wrist.y;
+
+  if(isPalm){
+    palmTimer+=16; fistTimer=0;
+    if(palmTimer>HOLD){
+      palmTimer=0;
+      clones.push(createSkeleton(0));
+      console.log("+1 clone");
+    }
+  }
+  else if(isFist){
+    fistTimer+=16; palmTimer=0;
+    if(fistTimer>HOLD){
+      fistTimer=0;
+      if(clones.length>1){
+        const c=clones.pop();
+        scene.remove(c.group);
+        console.log("-1 clone");
+      }
+    }
+  }
+  else{
+    palmTimer=0; fistTimer=0;
+  }
+});
+
+/* ================= LOOPS ================= */
+async function startPose(){
+  async function loop(){
+    await pose.send({image:video});
+    await hands.send({image:video});
+    requestAnimationFrame(loop);
+  }
+  loop();
 }
 
-/* ================= START ================= */
-startCamera();
+function animate(){
+  renderer.render(scene,cam);
+  requestAnimationFrame(animate);
+}
 
 addEventListener("resize",()=>{
-  cam3D.aspect=innerWidth/innerHeight;
-  cam3D.updateProjectionMatrix();
+  cam.aspect=innerWidth/innerHeight;
+  cam.updateProjectionMatrix();
   renderer.setSize(innerWidth,innerHeight);
 });
 </script>
